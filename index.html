@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta
+    name="viewport"
+    content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"
+  />
+  <title>Bee Bloom Rush</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div id="hud">
+    <div class="hud-left">
+      <div id="title">BEE BLOOM RUSH</div>
+      <div id="subtitle">Tap to jump flower-to-flower</div>
+    </div>
+    <div class="hud-right">
+      <div id="timer">30.0s</div>
+      <div id="score">Score: 0</div>
+      <div id="best">Best: 0</div>
+    </div>
+  </div>
+
+  <canvas id="gameCanvas"></canvas>
+
+  <div id="overlay" class="show">
+    <div class="panel">
+      <h1>BEE BLOOM RUSH</h1>
+      <p class="lead">
+        Buzz around each flower and leap to the next one before time runs out.
+      </p>
+
+      <div class="rules">
+        <div><strong>How to play:</strong> Tap to launch your bee from the current flower to the next glowing flower.</div>
+        <div><strong>Objective:</strong> Land on as many flowers as possible during the round.</div>
+        <div><strong>Danger:</strong> Spinning thorn stems appear later and get faster as the timer drops.</div>
+        <div><strong>Bonus:</strong> Land near the centre of a flower for a PERFECT bonus.</div>
+        <div><strong>Scoring:</strong> +1 for every successful flower landing. PERFECT landings give +2.</div>
+      </div>
+
+      <div class="button-row">
+        <button id="actionBtn" class="primary-btn">Tap to Start</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="game.js"></script>
+</body>
+</html>
