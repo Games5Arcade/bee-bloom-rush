@@ -110,7 +110,7 @@ function saveBestScore() {
   try {
     localStorage.setItem(STORAGE_KEY, String(game.bestScore));
   } catch (err) {
-    // Ignore storage failure.
+    // ignore
   }
 }
 
@@ -151,7 +151,7 @@ function isMobileViewport() {
 }
 
 function getPlayArea() {
-  const sideMargin = isMobileViewport() ? 58 : 82;
+  const sideMargin = isMobileViewport() ? 56 : 82;
   const topMargin = isMobileViewport() ? 150 : 120;
   const bottomMargin = isMobileViewport() ? 175 : 130;
 
@@ -243,102 +243,68 @@ function clampFlowerToScreen(flower) {
   return flower;
 }
 
-function makeStartFlower() {
+function getFlowerSlots() {
   const playArea = getPlayArea();
+  const w = playArea.right - playArea.left;
+  const h = playArea.bottom - playArea.top;
+
+  const xs = isMobileViewport()
+    ? [0.24, 0.5, 0.76]
+    : [0.18, 0.38, 0.62, 0.82];
+
+  const ys = isMobileViewport()
+    ? [0.22, 0.42, 0.62]
+    : [0.2, 0.38, 0.56, 0.74];
+
+  const slots = [];
+  for (const y of ys) {
+    for (const x of xs) {
+      slots.push({
+        x: playArea.left + w * x,
+        y: playArea.top + h * y,
+      });
+    }
+  }
+  return slots;
+}
+
+function makeStartFlower() {
+  const slots = getFlowerSlots();
+  const startSlot = isMobileViewport() ? slots[6] : slots[8];
   const radius = isMobileViewport() ? 26 : 28;
+  return clampFlowerToScreen(makeFlower(startSlot.x, startSlot.y, radius));
+}
 
-  const x = isMobileViewport()
-    ? playArea.left + (playArea.right - playArea.left) * 0.26
-    : width * 0.28;
+function chooseNextSlot(fromFlower) {
+  const slots = getFlowerSlots();
+  const minDistance = isMobileViewport() ? Math.min(width, height) * 0.15 : Math.min(width, height) * 0.2;
 
-  const y = isMobileViewport()
-    ? playArea.top + (playArea.bottom - playArea.top) * 0.62
-    : height * 0.62;
+  const candidates = slots.filter((slot) => {
+    const d = distance(fromFlower.x, fromFlower.y, slot.x, slot.y);
+    return d >= minDistance;
+  });
 
-  return clampFlowerToScreen(makeFlower(x, y, radius));
+  candidates.sort((a, b) => {
+    const da = distance(fromFlower.x, fromFlower.y, a.x, a.y);
+    const db = distance(fromFlower.x, fromFlower.y, b.x, b.y);
+    return da - db;
+  });
+
+  const pool = candidates.slice(0, Math.min(6, candidates.length));
+  return pool[Math.floor(Math.random() * pool.length)] || slots[0];
 }
 
 function makeFirstNextFlower(fromFlower) {
-  const playArea = getPlayArea();
-  const mobile = isMobileViewport();
-  const radius = mobile ? 24 : 26;
-
-  const targetX = mobile
-    ? playArea.left + (playArea.right - playArea.left) * 0.62
-    : fromFlower.x + Math.min(width, height) * 0.28;
-
-  const targetY = mobile
-    ? playArea.top + (playArea.bottom - playArea.top) * 0.46
-    : fromFlower.y - Math.min(width, height) * 0.04;
-
-  return clampFlowerToScreen(makeFlower(targetX, targetY, radius));
-}
-
-function getDirectionBias(fromFlower) {
-  const playArea = getPlayArea();
-  const centerX = (playArea.left + playArea.right) / 2;
-  const centerY = (playArea.top + playArea.bottom) / 2;
-
-  const dx = centerX - fromFlower.x;
-  const dy = centerY - fromFlower.y;
-
-  return Math.atan2(dy, dx);
+  const slots = getFlowerSlots();
+  const firstTargetSlot = isMobileViewport() ? slots[4] : slots[5];
+  const radius = isMobileViewport() ? 24 : 26;
+  return clampFlowerToScreen(makeFlower(firstTargetSlot.x, firstTargetSlot.y, radius));
 }
 
 function makeNextFlower(fromFlower) {
-  const mobile = isMobileViewport();
-  const playArea = getPlayArea();
-  const minDimension = Math.min(width, height);
-
-  const minDistance = mobile ? minDimension * 0.16 : minDimension * 0.23;
-  const maxDistance = mobile ? minDimension * 0.24 : minDimension * 0.36;
-
-  const baseAngle = getDirectionBias(fromFlower);
-  const angleSpread = mobile ? 1.15 : 1.35;
-
-  for (let i = 0; i < 100; i++) {
-    const angle = baseAngle + rand(-angleSpread, angleSpread);
-    const range = rand(minDistance, maxDistance);
-
-    let x = fromFlower.x + Math.cos(angle) * range;
-    let y = fromFlower.y + Math.sin(angle) * range;
-
-    const trialFlower = makeFlower(x, y, mobile ? rand(22, 28) : rand(23, 32));
-    clampFlowerToScreen(trialFlower);
-
-    x = trialFlower.x;
-    y = trialFlower.y;
-
-    const d = distance(fromFlower.x, fromFlower.y, x, y);
-
-    const fullyVisible =
-      x - trialFlower.catchRadius > playArea.left &&
-      x + trialFlower.catchRadius < playArea.right &&
-      y - trialFlower.catchRadius > playArea.top &&
-      y + trialFlower.catchRadius < playArea.bottom;
-
-    const notTooClose = d >= minDistance * 0.82;
-
-    if (fullyVisible && notTooClose) {
-      return trialFlower;
-    }
-  }
-
-  const fallback = makeFlower(
-    clamp(
-      fromFlower.x + (playArea.right - fromFlower.x) * 0.45,
-      playArea.left + 70,
-      playArea.right - 70
-    ),
-    clamp(
-      fromFlower.y + (((playArea.top + playArea.bottom) / 2) - fromFlower.y) * 0.45,
-      playArea.top + 70,
-      playArea.bottom - 70
-    ),
-    mobile ? 24 : 26
-  );
-
-  return clampFlowerToScreen(fallback);
+  const slot = chooseNextSlot(fromFlower);
+  const radius = isMobileViewport() ? rand(22, 28) : rand(23, 32);
+  return clampFlowerToScreen(makeFlower(slot.x, slot.y, radius));
 }
 
 function getSafeAnchorAngle(flower, elapsed) {
