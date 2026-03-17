@@ -151,9 +151,9 @@ function isMobileViewport() {
 }
 
 function getPlayArea() {
-  const sideMargin = isMobileViewport() ? 42 : 82;
-  const topMargin = isMobileViewport() ? 145 : 120;
-  const bottomMargin = isMobileViewport() ? 170 : 130;
+  const sideMargin = isMobileViewport() ? 34 : 70;
+  const topMargin = isMobileViewport() ? 115 : 95;
+  const bottomMargin = isMobileViewport() ? 165 : 125;
 
   return {
     left: sideMargin,
@@ -161,6 +161,16 @@ function getPlayArea() {
     top: topMargin,
     bottom: height - bottomMargin,
   };
+}
+
+function getMinFlowerDistance() {
+  const minDimension = Math.min(width, height);
+  return isMobileViewport() ? minDimension * 0.24 : minDimension * 0.26;
+}
+
+function getIdealFlowerDistance() {
+  const minDimension = Math.min(width, height);
+  return isMobileViewport() ? minDimension * 0.34 : minDimension * 0.38;
 }
 
 function createClouds() {
@@ -227,7 +237,7 @@ function makeFlower(x, y, radius) {
     catchRadius: radius * 1.7,
     perfectRadius: radius * 0.5,
     baseAngle: rand(0, Math.PI * 2),
-    thornLength: radius * 1.9,
+    thornLength: radius * 2.05,
     petal: style.petal,
     center: style.center,
   };
@@ -235,7 +245,7 @@ function makeFlower(x, y, radius) {
 
 function clampFlowerToScreen(flower) {
   const playArea = getPlayArea();
-  const pad = flower.catchRadius + 10;
+  const pad = flower.catchRadius + 8;
 
   flower.x = clamp(flower.x, playArea.left + pad, playArea.right - pad);
   flower.y = clamp(flower.y, playArea.top + pad, playArea.bottom - pad);
@@ -249,12 +259,12 @@ function getFlowerSlots() {
   const h = playArea.bottom - playArea.top;
 
   const xs = isMobileViewport()
-    ? [0.10, 0.32, 0.56, 0.80, 0.92]
-    : [0.10, 0.28, 0.50, 0.72, 0.90];
+    ? [0.06, 0.28, 0.50, 0.72, 0.94]
+    : [0.06, 0.26, 0.50, 0.74, 0.94];
 
   const ys = isMobileViewport()
-    ? [0.14, 0.34, 0.56, 0.78]
-    : [0.14, 0.34, 0.56, 0.78];
+    ? [0.08, 0.28, 0.48, 0.68, 0.84]
+    : [0.08, 0.28, 0.48, 0.68, 0.84];
 
   const slots = [];
   for (const y of ys) {
@@ -270,18 +280,15 @@ function getFlowerSlots() {
 
 function makeStartFlower() {
   const slots = getFlowerSlots();
-  const startSlot = isMobileViewport() ? slots[15] : slots[15];
+  const startSlot = isMobileViewport() ? slots[20] : slots[20];
   const radius = isMobileViewport() ? 26 : 28;
   return clampFlowerToScreen(makeFlower(startSlot.x, startSlot.y, radius));
 }
 
 function chooseNextSlot(fromFlower, preferWide = false) {
   const slots = getFlowerSlots();
-  const mobile = isMobileViewport();
-  const minDimension = Math.min(width, height);
-
-  const minDistance = mobile ? minDimension * 0.15 : minDimension * 0.20;
-  const idealDistance = mobile ? minDimension * 0.24 : minDimension * 0.30;
+  const minDistance = getMinFlowerDistance();
+  const idealDistance = getIdealFlowerDistance();
 
   const candidates = slots
     .map((slot) => {
@@ -290,21 +297,24 @@ function chooseNextSlot(fromFlower, preferWide = false) {
     })
     .filter((item) => item.d >= minDistance);
 
+  if (candidates.length === 0) {
+    const farthest = slots
+      .map((slot) => ({ slot, d: distance(fromFlower.x, fromFlower.y, slot.x, slot.y) }))
+      .sort((a, b) => b.d - a.d)[0];
+    return farthest.slot;
+  }
+
   candidates.sort((a, b) => {
     const aScore = Math.abs(a.d - idealDistance);
     const bScore = Math.abs(b.d - idealDistance);
     return aScore - bScore;
   });
 
-  let pool = candidates.slice(0, preferWide ? 10 : 8);
+  let pool = candidates.slice(0, preferWide ? 12 : 8);
 
   if (preferWide) {
     pool.sort((a, b) => b.d - a.d);
-    pool = pool.slice(0, Math.min(5, pool.length));
-  }
-
-  if (pool.length === 0) {
-    return slots[Math.floor(Math.random() * slots.length)];
+    pool = pool.slice(0, Math.min(6, pool.length));
   }
 
   return pool[Math.floor(Math.random() * pool.length)].slot;
@@ -509,7 +519,7 @@ function flowerThornHit(flower, settings, px, py, pr, elapsed) {
     const ty = flower.y + Math.sin(angle) * flower.thornLength;
     const d = pointSegmentDistance(px, py, flower.x, flower.y, tx, ty);
 
-    if (d <= pr + 4) {
+    if (d <= pr + 5) {
       return true;
     }
   }
@@ -635,7 +645,7 @@ function updateGame(dt) {
       finishRound(
         {
           title: "ROUND OVER",
-          text: "Your bee flew into a thorn stem.",
+          text: "Your bee flew into a thorn branch.",
         },
         "fail"
       );
@@ -712,10 +722,16 @@ function drawFlower(flower, isTarget, elapsed) {
   ctx.save();
 
   if (isTarget) {
-    const targetGlow = panic ? "rgba(200, 60, 79, 0.30)" : "rgba(255, 214, 90, 0.32)";
+    const targetGlow = panic ? "rgba(255, 70, 90, 0.34)" : "rgba(255, 214, 90, 0.34)";
     ctx.fillStyle = targetGlow;
     ctx.beginPath();
-    ctx.arc(flower.x, flower.y, flower.catchRadius + 10 + Math.sin(elapsed * 5) * 3, 0, Math.PI * 2);
+    ctx.arc(
+      flower.x,
+      flower.y,
+      flower.catchRadius + 12 + Math.sin(elapsed * 5) * 3,
+      0,
+      Math.PI * 2
+    );
     ctx.fill();
   }
 
@@ -742,9 +758,9 @@ function drawFlower(flower, isTarget, elapsed) {
   ctx.stroke();
 
   ctx.strokeStyle = isTarget
-    ? (panic ? "rgba(200,60,79,0.95)" : "rgba(255, 214, 90, 0.95)")
+    ? (panic ? "rgba(255,70,90,0.98)" : "rgba(255, 214, 90, 0.98)")
     : "rgba(255,255,255,0.22)";
-  ctx.lineWidth = isTarget ? 3.5 : 2;
+  ctx.lineWidth = isTarget ? 4 : 2;
   ctx.setLineDash(isTarget ? [] : [6, 8]);
   ctx.beginPath();
   ctx.arc(flower.x, flower.y, flower.catchRadius, 0, Math.PI * 2);
@@ -752,7 +768,7 @@ function drawFlower(flower, isTarget, elapsed) {
 
   if (isTarget) {
     ctx.setLineDash([3, 7]);
-    ctx.strokeStyle = panic ? "rgba(200,60,79,0.7)" : "rgba(255,214,90,0.65)";
+    ctx.strokeStyle = panic ? "rgba(255,70,90,0.8)" : "rgba(255,214,90,0.7)";
     ctx.lineWidth = 2;
     ctx.beginPath();
     ctx.arc(flower.x, flower.y, flower.perfectRadius, 0, Math.PI * 2);
@@ -774,25 +790,34 @@ function drawFlower(flower, isTarget, elapsed) {
     const ty = flower.y + Math.sin(angle) * flower.thornLength;
 
     ctx.save();
-    ctx.strokeStyle = panic ? "#c83c4f" : "#7c2f39";
-    ctx.lineWidth = 5;
+    ctx.strokeStyle = panic ? "#e14058" : "#8b2f3c";
+    ctx.lineWidth = 6;
     ctx.lineCap = "round";
+    ctx.shadowBlur = 8;
+    ctx.shadowColor = panic ? "#ff4d6d" : "#b43c4f";
     ctx.beginPath();
     ctx.moveTo(flower.x, flower.y);
     ctx.lineTo(tx, ty);
     ctx.stroke();
 
-    const thornCount = 3;
-    for (let t = 1; t <= thornCount; t++) {
-      const k = t / (thornCount + 1);
+    const hookCount = 4;
+    for (let t = 1; t <= hookCount; t++) {
+      const k = t / (hookCount + 1);
       const sx = flower.x + (tx - flower.x) * k;
       const sy = flower.y + (ty - flower.y) * k;
-      const side = (t % 2 === 0 ? 1 : -1) * 0.75;
-      const ta = angle + side;
+
+      const hookBaseAngle = angle + (t % 2 === 0 ? 1.2 : -1.2);
+      const hookTipAngle = hookBaseAngle + (t % 2 === 0 ? 0.8 : -0.8);
+
+      const hx1 = sx + Math.cos(hookBaseAngle) * 9;
+      const hy1 = sy + Math.sin(hookBaseAngle) * 9;
+      const hx2 = hx1 + Math.cos(hookTipAngle) * 5;
+      const hy2 = hy1 + Math.sin(hookTipAngle) * 5;
 
       ctx.beginPath();
       ctx.moveTo(sx, sy);
-      ctx.lineTo(sx + Math.cos(ta) * 9, sy + Math.sin(ta) * 9);
+      ctx.lineTo(hx1, hy1);
+      ctx.lineTo(hx2, hy2);
       ctx.stroke();
     }
 
@@ -808,8 +833,8 @@ function drawGuideLine() {
 
   ctx.save();
   ctx.setLineDash([7, 10]);
-  ctx.strokeStyle = panic ? "rgba(200,60,79,0.36)" : "rgba(75, 96, 40, 0.3)";
-  ctx.lineWidth = panic ? 2.5 : 2;
+  ctx.strokeStyle = panic ? "rgba(255,70,90,0.42)" : "rgba(75, 96, 40, 0.3)";
+  ctx.lineWidth = panic ? 2.8 : 2;
   ctx.beginPath();
   ctx.moveTo(p.x, p.y);
   ctx.lineTo(game.nextFlower.x, game.nextFlower.y);
@@ -899,16 +924,16 @@ function drawPhaseHint(elapsed) {
 
   if (elapsed >= 8 && elapsed < 16) {
     text = "THORNS ACTIVE";
-    color = "#a46f00";
+    color = "#b25a00";
   } else if (elapsed >= 16 && elapsed < 24) {
-    text = "FASTER THORNS";
-    color = "#c26b00";
+    text = "DANGER";
+    color = "#d46a00";
   } else if (elapsed >= 24 && elapsed < 25) {
     text = "WILD GARDEN";
-    color = "#a12b3a";
+    color = "#b13545";
   } else if (elapsed >= 25) {
     text = "PANIC MODE";
-    color = "#c83c4f";
+    color = "#e14058";
   }
 
   ctx.save();
@@ -936,7 +961,7 @@ function drawPanicOverlay() {
 
   const strength = (5 - game.timeLeft) / 5;
   ctx.save();
-  ctx.fillStyle = `rgba(200,60,79,${0.05 + strength * 0.08})`;
+  ctx.fillStyle = `rgba(225,64,88,${0.05 + strength * 0.08})`;
   ctx.fillRect(0, 0, width, height);
   ctx.restore();
 }
