@@ -1,14 +1,13 @@
 :root {
   --sky-a: #dff8ff;
   --sky-b: #9fe2ff;
-  --panel: rgba(255, 255, 255, 0.92);
+  --panel: rgba(255, 255, 255, 0.93);
   --panel-border: rgba(255, 184, 66, 0.35);
   --text: #193126;
   --primary-a: #ffd84d;
   --primary-b: #ffb347;
   --secondary-a: #ffffff;
   --secondary-b: #f4f4f4;
-  --danger: #c83c4f;
 }
 
 * {
@@ -94,6 +93,17 @@ body {
   font-size: 16px;
 }
 
+.hud-btn {
+  pointer-events: auto;
+  border: none;
+  border-radius: 999px;
+  padding: 8px 12px;
+  cursor: pointer;
+  font-size: 16px;
+  background: rgba(255, 255, 255, 0.88);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.08);
+}
+
 #overlay {
   position: fixed;
   inset: 0;
@@ -111,7 +121,7 @@ body {
 }
 
 .panel {
-  width: min(94vw, 470px);
+  width: min(94vw, 480px);
   background: var(--panel);
   border: 2px solid var(--panel-border);
   border-radius: 18px;
