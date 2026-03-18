@@ -6,9 +6,12 @@ const actionBtn = document.getElementById("actionBtn");
 const timerEl = document.getElementById("timer");
 const scoreEl = document.getElementById("score");
 const bestEl = document.getElementById("best");
+const soundToggleBtn = document.getElementById("soundToggle");
+const startSoundToggleBtn = document.getElementById("startSoundToggle");
 
 const ROUND_TIME = 30;
-const STORAGE_KEY = "beeBloomRushHighScore";
+const BEST_KEY = "beeBloomRushBest";
+const SOUND_KEY = "game5ArcadeSoundEnabled";
 
 let width = 0;
 let height = 0;
@@ -21,97 +24,44 @@ const game = {
   score: 0,
   bestScore: 0,
   timeLeft: ROUND_TIME,
+  soundEnabled: true,
   lastFrame: 0,
   clouds: [],
   pollen: [],
-  player: null,
+  popup: null,
+  particles: [],
+  cameraShake: 0,
+
   currentFlower: null,
   nextFlower: null,
-  popup: null,
-  shake: 0,
+  player: null,
+  flowerIndex: 0,
 };
 
-function ensureAudio() {
-  if (!audioContext) {
-    const AudioCtx = window.AudioContext || window.webkitAudioContext;
-    if (AudioCtx) {
-      audioContext = new AudioCtx();
-    }
-  }
-
-  if (audioContext && audioContext.state === "suspended") {
-    audioContext.resume().catch(() => {});
-  }
+function rand(min, max) {
+  return Math.random() * (max - min) + min;
 }
 
-function playTone(type, frequency, duration, volume, slideTo = null) {
-  if (!audioContext) return;
-
-  const now = audioContext.currentTime;
-  const osc = audioContext.createOscillator();
-  const gain = audioContext.createGain();
-
-  osc.type = type;
-  osc.frequency.setValueAtTime(frequency, now);
-
-  if (slideTo !== null) {
-    osc.frequency.exponentialRampToValueAtTime(Math.max(40, slideTo), now + duration);
-  }
-
-  gain.gain.setValueAtTime(0.0001, now);
-  gain.gain.exponentialRampToValueAtTime(volume, now + 0.01);
-  gain.gain.exponentialRampToValueAtTime(0.0001, now + duration);
-
-  osc.connect(gain);
-  gain.connect(audioContext.destination);
-
-  osc.start(now);
-  osc.stop(now + duration + 0.02);
+function clamp(v, min, max) {
+  return Math.max(min, Math.min(max, v));
 }
 
-function playTapSound() {
-  playTone("triangle", 440, 0.08, 0.03, 520);
+function angleWrap(a) {
+  while (a <= -Math.PI) a += Math.PI * 2;
+  while (a > Math.PI) a -= Math.PI * 2;
+  return a;
 }
 
-function playJumpSound() {
-  playTone("triangle", 520, 0.12, 0.04, 700);
+function angleDistance(a, b) {
+  return Math.abs(angleWrap(a - b));
 }
 
-function playLandSound() {
-  playTone("sine", 620, 0.10, 0.035, 760);
+function distance(ax, ay, bx, by) {
+  return Math.hypot(bx - ax, by - ay);
 }
 
-function playPerfectSound() {
-  playTone("triangle", 760, 0.12, 0.045, 980);
-  setTimeout(() => playTone("triangle", 980, 0.10, 0.035, 1200), 60);
-}
-
-function playFailSound() {
-  playTone("sawtooth", 240, 0.22, 0.03, 110);
-}
-
-function playTimeUpSound() {
-  playTone("triangle", 660, 0.12, 0.035, 840);
-  setTimeout(() => playTone("triangle", 840, 0.12, 0.03, 1040), 70);
-}
-
-function loadBestScore() {
-  try {
-    const saved = localStorage.getItem(STORAGE_KEY);
-    const parsed = Number(saved || 0);
-    game.bestScore = Number.isFinite(parsed) ? Math.max(0, Math.floor(parsed)) : 0;
-  } catch (err) {
-    game.bestScore = 0;
-  }
-  bestEl.textContent = `Best: ${game.bestScore}`;
-}
-
-function saveBestScore() {
-  try {
-    localStorage.setItem(STORAGE_KEY, String(game.bestScore));
-  } catch (err) {
-    // ignore
-  }
+function isMobileViewport() {
+  return width <= 700 || height <= 900;
 }
 
 function resizeCanvas() {
@@ -128,31 +78,11 @@ function resizeCanvas() {
 
   createClouds();
   createPollen();
-
-  if (!game.player) {
-    resetGameState();
-  }
-}
-
-function rand(min, max) {
-  return Math.random() * (max - min) + min;
-}
-
-function clamp(value, min, max) {
-  return Math.max(min, Math.min(max, value));
-}
-
-function distance(ax, ay, bx, by) {
-  return Math.hypot(bx - ax, by - ay);
-}
-
-function isMobileViewport() {
-  return width <= 700 || height <= 900;
 }
 
 function getPlayArea() {
   const sideMargin = isMobileViewport() ? 34 : 70;
-  const topMargin = isMobileViewport() ? 115 : 95;
+  const topMargin = isMobileViewport() ? 112 : 95;
   const bottomMargin = isMobileViewport() ? 165 : 125;
 
   return {
@@ -191,7 +121,7 @@ function createClouds() {
 
 function createPollen() {
   game.pollen = [];
-  const count = Math.floor((width * height) / 14000);
+  const count = Math.floor((width * height) / 15000);
 
   for (let i = 0; i < count; i++) {
     game.pollen.push({
@@ -200,28 +130,150 @@ function createPollen() {
       r: rand(1.2, 2.4),
       s: rand(10, 24),
       drift: rand(-8, 8),
-      a: rand(0.25, 0.65),
+      a: rand(0.22, 0.6),
     });
   }
 }
 
-function getThornSettings(elapsed) {
-  if (elapsed < 8) {
-    return { count: 0, speed: 0 };
+function loadPrefs() {
+  try {
+    const best = Number(localStorage.getItem(BEST_KEY) || 0);
+    game.bestScore = Number.isFinite(best) ? Math.max(0, Math.floor(best)) : 0;
+  } catch (err) {
+    game.bestScore = 0;
   }
-  if (elapsed < 16) {
-    return { count: 1, speed: 0.55 };
+
+  try {
+    const soundSaved = localStorage.getItem(SOUND_KEY);
+    if (soundSaved !== null) {
+      game.soundEnabled = soundSaved === "true";
+    }
+  } catch (err) {
+    game.soundEnabled = true;
   }
-  if (elapsed < 24) {
-    return { count: 1, speed: 0.95 };
-  }
-  if (elapsed < 25) {
-    return { count: 2, speed: 1.3 };
-  }
-  return { count: 2, speed: 1.85 };
+
+  bestEl.textContent = `Best: ${game.bestScore}`;
+  updateSoundButtons();
 }
 
-function makeFlower(x, y, radius) {
+function saveBestScore() {
+  try {
+    localStorage.setItem(BEST_KEY, String(game.bestScore));
+  } catch (err) {
+    // ignore
+  }
+}
+
+function saveSoundPref() {
+  try {
+    localStorage.setItem(SOUND_KEY, String(game.soundEnabled));
+  } catch (err) {
+    // ignore
+  }
+}
+
+function updateSoundButtons() {
+  soundToggleBtn.textContent = game.soundEnabled ? "🔊" : "🔇";
+  startSoundToggleBtn.textContent = game.soundEnabled ? "Sound: ON" : "Sound: OFF";
+}
+
+function toggleSound() {
+  game.soundEnabled = !game.soundEnabled;
+  saveSoundPref();
+  updateSoundButtons();
+}
+
+function toggleSoundFromOverlay() {
+  toggleSound();
+  const btn = document.getElementById("startSoundToggle");
+  if (btn) {
+    btn.textContent = game.soundEnabled ? "Sound: ON" : "Sound: OFF";
+  }
+}
+
+function ensureAudio() {
+  if (!game.soundEnabled) return;
+
+  if (!audioContext) {
+    const AudioCtx = window.AudioContext || window.webkitAudioContext;
+    if (AudioCtx) {
+      audioContext = new AudioCtx();
+    }
+  }
+
+  if (audioContext && audioContext.state === "suspended") {
+    audioContext.resume().catch(() => {});
+  }
+}
+
+function playTone(type, frequency, duration, volume, slideTo = null) {
+  if (!game.soundEnabled) return;
+  ensureAudio();
+  if (!audioContext) return;
+
+  const now = audioContext.currentTime;
+  const osc = audioContext.createOscillator();
+  const gain = audioContext.createGain();
+
+  osc.type = type;
+  osc.frequency.setValueAtTime(frequency, now);
+
+  if (slideTo !== null) {
+    osc.frequency.exponentialRampToValueAtTime(Math.max(40, slideTo), now + duration);
+  }
+
+  gain.gain.setValueAtTime(0.0001, now);
+  gain.gain.exponentialRampToValueAtTime(volume, now + 0.01);
+  gain.gain.exponentialRampToValueAtTime(0.0001, now + duration);
+
+  osc.connect(gain);
+  gain.connect(audioContext.destination);
+
+  osc.start(now);
+  osc.stop(now + duration + 0.02);
+}
+
+function playTapSound() {
+  playTone("triangle", 440, 0.08, 0.03, 520);
+}
+
+function playJumpSound() {
+  playTone("triangle", 520, 0.1, 0.04, 700);
+}
+
+function playLandSound() {
+  playTone("sine", 640, 0.1, 0.04, 820);
+}
+
+function playPerfectSound() {
+  playTone("triangle", 760, 0.11, 0.045, 980);
+  setTimeout(() => playTone("triangle", 980, 0.08, 0.035, 1200), 55);
+}
+
+function playFailSound() {
+  playTone("sawtooth", 220, 0.22, 0.03, 100);
+}
+
+function getThornCount() {
+  if (game.score < 4) return 1;
+  if (game.score < 10) return 2;
+  return 3;
+}
+
+function getRotationSpeed() {
+  if (game.score < 5) return 1.35;
+  if (game.score < 12) return 1.65;
+  return 1.95;
+}
+
+function getWindowAngles() {
+  return {
+    perfect: Math.PI / 18, // 10°
+    normal: Math.PI / 7.5, // 24°
+  };
+}
+
+function makeFlower(x, y, radius, index) {
   const palette = [
     { petal: "#ff77b7", center: "#ffd84d" },
     { petal: "#b07cff", center: "#ffd84d" },
@@ -229,17 +281,21 @@ function makeFlower(x, y, radius) {
     { petal: "#ff6f91", center: "#ffe36b" },
   ];
   const style = palette[Math.floor(Math.random() * palette.length)];
+  const direction = index % 2 === 0 ? 1 : -1;
 
   return {
     x,
     y,
     radius,
-    catchRadius: radius * 1.7,
+    catchRadius: radius * 1.72,
     perfectRadius: radius * 0.5,
-    baseAngle: rand(0, Math.PI * 2),
-    thornLength: radius * 2.05,
     petal: style.petal,
     center: style.center,
+    direction,
+    baseAngle: rand(0, Math.PI * 2),
+    thornLength: radius * 2.05,
+    thorns: [],
+    safeAngle: 0,
   };
 }
 
@@ -262,9 +318,7 @@ function getFlowerSlots() {
     ? [0.06, 0.28, 0.50, 0.72, 0.94]
     : [0.06, 0.26, 0.50, 0.74, 0.94];
 
-  const ys = isMobileViewport()
-    ? [0.08, 0.28, 0.48, 0.68, 0.84]
-    : [0.08, 0.28, 0.48, 0.68, 0.84];
+  const ys = [0.08, 0.28, 0.48, 0.68, 0.84];
 
   const slots = [];
   for (const y of ys) {
@@ -280,28 +334,24 @@ function getFlowerSlots() {
 
 function makeStartFlower() {
   const slots = getFlowerSlots();
-  const startSlot = isMobileViewport() ? slots[20] : slots[20];
+  const slot = slots[20];
   const radius = isMobileViewport() ? 26 : 28;
-  return clampFlowerToScreen(makeFlower(startSlot.x, startSlot.y, radius));
+  return clampFlowerToScreen(makeFlower(slot.x, slot.y, radius, 0));
 }
 
-function chooseNextSlot(fromFlower, preferWide = false) {
+function chooseNextSlot(fromFlower) {
   const slots = getFlowerSlots();
   const minDistance = getMinFlowerDistance();
   const idealDistance = getIdealFlowerDistance();
 
   const candidates = slots
-    .map((slot) => {
-      const d = distance(fromFlower.x, fromFlower.y, slot.x, slot.y);
-      return { slot, d };
-    })
+    .map((slot) => ({ slot, d: distance(fromFlower.x, fromFlower.y, slot.x, slot.y) }))
     .filter((item) => item.d >= minDistance);
 
   if (candidates.length === 0) {
-    const farthest = slots
+    return slots
       .map((slot) => ({ slot, d: distance(fromFlower.x, fromFlower.y, slot.x, slot.y) }))
-      .sort((a, b) => b.d - a.d)[0];
-    return farthest.slot;
+      .sort((a, b) => b.d - a.d)[0].slot;
   }
 
   candidates.sort((a, b) => {
@@ -310,49 +360,37 @@ function chooseNextSlot(fromFlower, preferWide = false) {
     return aScore - bScore;
   });
 
-  let pool = candidates.slice(0, preferWide ? 12 : 8);
-
-  if (preferWide) {
-    pool.sort((a, b) => b.d - a.d);
-    pool = pool.slice(0, Math.min(6, pool.length));
-  }
-
+  const pool = candidates.slice(0, Math.min(6, candidates.length)).sort((a, b) => b.d - a.d);
   return pool[Math.floor(Math.random() * pool.length)].slot;
 }
 
-function makeFirstNextFlower(fromFlower) {
-  const slot = chooseNextSlot(fromFlower, true);
-  const radius = isMobileViewport() ? 24 : 26;
-  return clampFlowerToScreen(makeFlower(slot.x, slot.y, radius));
-}
-
-function makeNextFlower(fromFlower) {
-  const slot = chooseNextSlot(fromFlower, true);
+function makeNextFlower(fromFlower, index) {
+  const slot = chooseNextSlot(fromFlower);
   const radius = isMobileViewport() ? rand(22, 28) : rand(23, 32);
-  return clampFlowerToScreen(makeFlower(slot.x, slot.y, radius));
+  return clampFlowerToScreen(makeFlower(slot.x, slot.y, radius, index));
 }
 
-function getSafeAnchorAngle(flower, elapsed) {
-  const thornSettings = getThornSettings(elapsed);
-  const baseRotationSpeed = 1.1;
-  const movingAngle = flower.baseAngle + elapsed * baseRotationSpeed;
+function configureSafeGap(currentFlower, nextFlower) {
+  const targetAngle = Math.atan2(nextFlower.y - currentFlower.y, nextFlower.x - currentFlower.x);
+  currentFlower.safeAngle = targetAngle;
 
-  if (thornSettings.count <= 0) {
-    return movingAngle + Math.PI;
+  const thornCount = getThornCount();
+  const gap = (Math.PI * 2) / thornCount;
+  const halfGap = gap / 2;
+
+  currentFlower.thorns = [];
+
+  for (let i = 0; i < thornCount; i++) {
+    const thornAngle = targetAngle + halfGap + i * gap;
+    currentFlower.thorns.push(thornAngle);
   }
-
-  if (thornSettings.count === 1) {
-    return flower.baseAngle + elapsed * thornSettings.speed + Math.PI;
-  }
-
-  return flower.baseAngle + elapsed * thornSettings.speed + Math.PI / 2;
 }
 
-function updateAnchoredBeePosition() {
-  const p = game.player;
+function updatePlayerAnchorPosition() {
   const f = game.currentFlower;
-  p.x = f.x + Math.cos(p.anchorAngle) * p.anchorRadius;
-  p.y = f.y + Math.sin(p.anchorAngle) * p.anchorRadius;
+  const p = game.player;
+  p.x = f.x + Math.cos(p.angle) * p.orbitRadius;
+  p.y = f.y + Math.sin(p.angle) * p.orbitRadius;
 }
 
 function showPopup(text, x, y, color) {
@@ -361,88 +399,74 @@ function showPopup(text, x, y, color) {
     x,
     y,
     color,
-    life: 1.0,
+    life: 1,
   };
 }
 
-function resetGameState() {
+function addParticles(x, y, color) {
+  for (let i = 0; i < 14; i++) {
+    game.particles.push({
+      x,
+      y,
+      vx: rand(-90, 90),
+      vy: rand(-110, -35),
+      r: rand(2, 4),
+      life: rand(0.4, 0.85),
+      color,
+    });
+  }
+}
+
+function resetRound() {
   game.score = 0;
   game.timeLeft = ROUND_TIME;
   game.roundOver = false;
   game.popup = null;
-  game.shake = 0;
+  game.particles = [];
+  game.cameraShake = 0;
+  game.flowerIndex = 1;
 
   scoreEl.textContent = "Score: 0";
   timerEl.textContent = `${ROUND_TIME.toFixed(1)}s`;
   bestEl.textContent = `Best: ${game.bestScore}`;
 
   game.currentFlower = makeStartFlower();
-  game.nextFlower = makeFirstNextFlower(game.currentFlower);
-
-  const initialElapsed = 0;
-  const initialAnchor = getSafeAnchorAngle(game.currentFlower, initialElapsed);
+  game.nextFlower = makeNextFlower(game.currentFlower, game.flowerIndex);
+  configureSafeGap(game.currentFlower, game.nextFlower);
 
   game.player = {
-    mode: "anchor",
+    state: "orbit",
     x: 0,
     y: 0,
-    radius: isMobileViewport() ? 10 : 11,
-    anchorRadius: game.currentFlower.radius + 16,
-    anchorAngle: initialAnchor,
-    vx: 0,
-    vy: 0,
+    r: isMobileViewport() ? 10 : 11,
+    orbitRadius: game.currentFlower.radius + 16,
+    angle: game.currentFlower.safeAngle - Math.PI / 2,
+    startX: 0,
+    startY: 0,
+    endX: 0,
+    endY: 0,
+    flightProgress: 0,
+    flightDuration: 0.22,
+    awardedPoints: 0,
     trail: [],
     wingPhase: 0,
   };
 
-  updateAnchoredBeePosition();
+  updatePlayerAnchorPosition();
 }
 
 function beginRound() {
   ensureAudio();
   playTapSound();
-  resetGameState();
+  resetRound();
   game.running = true;
   overlay.classList.remove("show");
 }
 
-async function shareScore() {
-  const isHosted = window.location.protocol.startsWith("http");
-  const url = isHosted ? window.location.href : "Play Bee Bloom Rush once it is hosted online.";
-  const text = `I scored ${game.score} in Bee Bloom Rush! Can you beat me?`;
-  const fullMessage = `${text}\n${url}`;
-
-  try {
-    if (navigator.share && isHosted) {
-      await navigator.share({
-        title: "Bee Bloom Rush",
-        text,
-        url: window.location.href
-      });
-      return;
-    }
-
-    if (navigator.clipboard && navigator.clipboard.writeText) {
-      await navigator.clipboard.writeText(fullMessage);
-      alert("Score message copied. Paste it into social media or messages.");
-      return;
-    }
-
-    alert(fullMessage);
-  } catch (err) {
-    // ignore
-  }
-}
-
-function finishRound(message, soundType = "fail") {
+function finishRound(title, text) {
   game.running = false;
   game.roundOver = true;
-
-  if (soundType === "timeup") {
-    playTimeUpSound();
-  } else {
-    playFailSound();
-  }
+  playFailSound();
 
   if (game.score > game.bestScore) {
     game.bestScore = game.score;
@@ -453,128 +477,105 @@ function finishRound(message, soundType = "fail") {
 
   overlay.innerHTML = `
     <div class="panel">
-      <h1>${message.title}</h1>
-      <p class="lead">${message.text}</p>
+      <h1>${title}</h1>
+      <p class="lead">${text}</p>
+
       <div class="rules">
         <div><strong>Round score:</strong> ${game.score}</div>
         <div><strong>High score:</strong> ${game.bestScore}</div>
-        <div><strong>Round length:</strong> ${ROUND_TIME} seconds</div>
-        <div><strong>Tip:</strong> Perfect centre landings score more, and the last 5 seconds are the hardest.</div>
+        <div><strong>Scoring:</strong> Gold zone = +2, green zone = +1</div>
+        <div><strong>Rule:</strong> Tap only when the bee is inside the safe gap.</div>
       </div>
+
       <div class="button-row">
-        <button id="restartBtn" class="primary-btn">Play Again</button>
-        <button id="shareBtn" class="secondary-btn">Share Score</button>
+        <button id="actionBtn" class="primary-btn">Play Again</button>
+        <button id="startSoundToggle" class="secondary-btn">${game.soundEnabled ? "Sound: ON" : "Sound: OFF"}</button>
       </div>
     </div>
   `;
 
   overlay.classList.add("show");
-
-  document.getElementById("restartBtn").addEventListener("click", beginRound);
-  document.getElementById("shareBtn").addEventListener("click", shareScore);
+  document.getElementById("actionBtn").addEventListener("click", beginRound);
+  document.getElementById("startSoundToggle").addEventListener("click", toggleSoundFromOverlay);
 }
 
-function launchBee() {
-  ensureAudio();
-
+function tryJump() {
   if (!game.running) {
     beginRound();
     return;
   }
 
-  const p = game.player;
-  if (p.mode !== "anchor") return;
+  if (!game.player || game.player.state !== "orbit") return;
 
-  playJumpSound();
+  const playerAngle = Math.atan2(
+    game.player.y - game.currentFlower.y,
+    game.player.x - game.currentFlower.x
+  );
 
-  const dx = game.nextFlower.x - p.x;
-  const dy = game.nextFlower.y - p.y;
-  const len = Math.hypot(dx, dy) || 1;
-  const jumpSpeed = isMobileViewport() ? 360 : 400;
+  const windows = getWindowAngles();
+  const diff = angleDistance(playerAngle, game.currentFlower.safeAngle);
 
-  p.mode = "jump";
-  p.vx = (dx / len) * jumpSpeed;
-  p.vy = (dy / len) * jumpSpeed;
-}
+  let awardedPoints = 0;
 
-function pointSegmentDistance(px, py, x1, y1, x2, y2) {
-  const dx = x2 - x1;
-  const dy = y2 - y1;
-  const lenSq = dx * dx + dy * dy || 1;
-
-  let t = ((px - x1) * dx + (py - y1) * dy) / lenSq;
-  t = clamp(t, 0, 1);
-
-  const cx = x1 + t * dx;
-  const cy = y1 + t * dy;
-  return distance(px, py, cx, cy);
-}
-
-function flowerThornHit(flower, settings, px, py, pr, elapsed) {
-  if (settings.count <= 0) return false;
-
-  for (let i = 0; i < settings.count; i++) {
-    const angle = flower.baseAngle + elapsed * settings.speed + (Math.PI * 2 * i) / settings.count;
-    const tx = flower.x + Math.cos(angle) * flower.thornLength;
-    const ty = flower.y + Math.sin(angle) * flower.thornLength;
-    const d = pointSegmentDistance(px, py, flower.x, flower.y, tx, ty);
-
-    if (d <= pr + 5) {
-      return true;
-    }
-  }
-
-  return false;
-}
-
-function applyLandingScore(flower, landingDistance) {
-  let gained = 1;
-
-  if (landingDistance <= flower.perfectRadius) {
-    gained = 2;
-    showPopup("PERFECT +2", flower.x, flower.y - flower.radius - 18, "#d08b00");
+  if (diff <= windows.perfect) {
+    awardedPoints = 2;
     playPerfectSound();
-  } else {
-    showPopup("+1", flower.x, flower.y - flower.radius - 14, "#2f9348");
+  } else if (diff <= windows.normal) {
+    awardedPoints = 1;
     playLandSound();
-  }
-
-  game.score += gained;
-  scoreEl.textContent = `Score: ${game.score}`;
-}
-
-function tryLanding(elapsed) {
-  const p = game.player;
-  const d = distance(p.x, p.y, game.nextFlower.x, game.nextFlower.y);
-
-  if (d <= game.nextFlower.catchRadius) {
-    const landedFlower = game.nextFlower;
-    const landingDistance = d;
-
-    game.currentFlower = landedFlower;
-    game.nextFlower = makeNextFlower(game.currentFlower);
-
-    p.mode = "anchor";
-    p.anchorRadius = game.currentFlower.radius + 16;
-    p.anchorAngle = getSafeAnchorAngle(game.currentFlower, elapsed);
-
-    updateAnchoredBeePosition();
-    applyLandingScore(landedFlower, landingDistance);
+  } else {
+    finishRound("ROUND OVER", "You launched outside the safe landing zone.");
     return;
   }
 
-  if (p.x < -60 || p.x > width + 60 || p.y < -60 || p.y > height + 60) {
-    finishRound(
-      {
-        title: "ROUND OVER",
-        text: "Your bee missed the next flower.",
-      },
-      "fail"
-    );
-  }
+  playJumpSound();
+
+  game.player.state = "flight";
+  game.player.flightProgress = 0;
+  game.player.flightDuration = clamp(
+    distance(game.currentFlower.x, game.currentFlower.y, game.nextFlower.x, game.nextFlower.y) / 720,
+    0.16,
+    0.34
+  );
+  game.player.startX = game.player.x;
+  game.player.startY = game.player.y;
+  game.player.endX = game.nextFlower.x;
+  game.player.endY = game.nextFlower.y;
+  game.player.awardedPoints = awardedPoints;
 }
 
-function updateGame(dt) {
+function completeJump() {
+  const landedFlower = game.nextFlower;
+  const points = game.player.awardedPoints;
+
+  game.score += points;
+  scoreEl.textContent = `Score: ${game.score}`;
+
+  showPopup(
+    points === 2 ? "PERFECT +2" : "+1",
+    landedFlower.x,
+    landedFlower.y - landedFlower.radius - 18,
+    points === 2 ? "#d08b00" : "#2f9348"
+  );
+
+  addParticles(landedFlower.x, landedFlower.y, landedFlower.petal);
+
+  game.currentFlower = landedFlower;
+  game.flowerIndex += 1;
+  game.nextFlower = makeNextFlower(game.currentFlower, game.flowerIndex);
+  configureSafeGap(game.currentFlower, game.nextFlower);
+
+  game.player.state = "orbit";
+  game.player.orbitRadius = game.currentFlower.radius + 16;
+
+  const safeAngle = game.currentFlower.safeAngle;
+  const offset = game.currentFlower.direction === 1 ? -Math.PI / 2 : Math.PI / 2;
+  game.player.angle = safeAngle + offset;
+
+  updatePlayerAnchorPosition();
+}
+
+function updateClouds(dt) {
   for (const cloud of game.clouds) {
     cloud.x += cloud.s * dt;
     if (cloud.x - cloud.w > width + 40) {
@@ -582,10 +583,13 @@ function updateGame(dt) {
       cloud.y = Math.random() * (height * 0.35);
     }
   }
+}
 
+function updatePollen(dt) {
   for (const p of game.pollen) {
     p.y += p.s * dt;
     p.x += p.drift * dt;
+
     if (p.y > height + 4) {
       p.y = -4;
       p.x = Math.random() * width;
@@ -593,78 +597,84 @@ function updateGame(dt) {
     if (p.x < -4) p.x = width + 4;
     if (p.x > width + 4) p.x = -4;
   }
+}
 
+function updateEffects(dt) {
   if (game.popup) {
     game.popup.life -= dt * 1.4;
-    game.popup.y -= dt * 26;
+    game.popup.y -= dt * 28;
     if (game.popup.life <= 0) {
       game.popup = null;
     }
   }
 
-  if (game.shake > 0) {
-    game.shake -= dt * 2.5;
-    if (game.shake < 0) game.shake = 0;
+  if (game.cameraShake > 0) {
+    game.cameraShake -= dt * 2.6;
+    if (game.cameraShake < 0) game.cameraShake = 0;
   }
+
+  for (const p of game.particles) {
+    p.x += p.vx * dt;
+    p.y += p.vy * dt;
+    p.vy += 220 * dt;
+    p.life -= dt;
+  }
+  game.particles = game.particles.filter((p) => p.life > 0);
+}
+
+function updatePlayer(dt) {
+  const p = game.player;
+  if (!p) return;
+
+  p.wingPhase += dt * 24;
+
+  if (p.state === "orbit") {
+    p.angle += getRotationSpeed() * game.currentFlower.direction * dt;
+    updatePlayerAnchorPosition();
+  } else if (p.state === "flight") {
+    p.flightProgress += dt / p.flightDuration;
+    const t = clamp(p.flightProgress, 0, 1);
+    const arc = Math.sin(t * Math.PI) * 34;
+
+    p.x = p.startX + (p.endX - p.startX) * t;
+    p.y = p.startY + (p.endY - p.startY) * t - arc;
+
+    if (t >= 1) {
+      completeJump();
+    }
+  }
+
+  p.trail.push({ x: p.x, y: p.y, life: 1 });
+  if (p.trail.length > 16) {
+    p.trail.shift();
+  }
+  for (const tr of p.trail) {
+    tr.life -= dt * 2.4;
+  }
+  p.trail = p.trail.filter((tr) => tr.life > 0);
+}
+
+function updateGame(dt) {
+  updateClouds(dt);
+  updatePollen(dt);
+  updateEffects(dt);
+  updatePlayer(dt);
 
   if (!game.running) return;
 
   game.timeLeft -= dt;
   if (game.timeLeft <= 0) {
     game.timeLeft = 0;
-    timerEl.textContent = `0.0s`;
-    finishRound(
-      {
-        title: "TIME UP",
-        text: "Your bee survived the full round.",
-      },
-      "timeup"
-    );
+    timerEl.textContent = "0.0s";
+    finishRound("TIME UP", "Your round is over.");
     return;
   }
 
   timerEl.textContent = `${game.timeLeft.toFixed(1)}s`;
 
-  const elapsed = ROUND_TIME - game.timeLeft;
-  const thornSettings = getThornSettings(elapsed);
-  const p = game.player;
-  p.wingPhase += dt * 25;
-
   if (game.timeLeft <= 5) {
-    game.shake = Math.max(game.shake, 0.35);
+    game.cameraShake = Math.max(game.cameraShake, 0.18);
   }
-
-  if (p.mode === "anchor") {
-    p.anchorAngle = getSafeAnchorAngle(game.currentFlower, elapsed);
-    updateAnchoredBeePosition();
-  } else {
-    p.x += p.vx * dt;
-    p.y += p.vy * dt;
-
-    if (flowerThornHit(game.nextFlower, thornSettings, p.x, p.y, p.radius, elapsed)) {
-      finishRound(
-        {
-          title: "ROUND OVER",
-          text: "Your bee flew into a thorn branch.",
-        },
-        "fail"
-      );
-      return;
-    }
-
-    tryLanding(elapsed);
-  }
-
-  p.trail.push({ x: p.x, y: p.y, life: 1 });
-  if (p.trail.length > 18) {
-    p.trail.shift();
-  }
-
-  for (const trail of p.trail) {
-    trail.life -= dt * 2.4;
-  }
-
-  p.trail = p.trail.filter((t) => t.life > 0);
 }
 
 function drawCloud(x, y, w, h, alpha) {
@@ -677,7 +687,6 @@ function drawCloud(x, y, w, h, alpha) {
   ctx.ellipse(x + w * 0.18, y - h * 0.12, w * 0.24, h * 0.4, 0, 0, Math.PI * 2);
   ctx.ellipse(x + w * 0.4, y, w * 0.28, h * 0.34, 0, 0, Math.PI * 2);
   ctx.fill();
-
   ctx.restore();
 }
 
@@ -712,23 +721,21 @@ function drawBackground() {
   }
 }
 
-function drawFlower(flower, isTarget, elapsed) {
-  const pulse = 1 + Math.sin(elapsed * 3 + flower.x * 0.015) * 0.04;
+function drawFlowerBase(flower, isTarget, nowSec) {
+  const pulse = 1 + Math.sin(nowSec * 3 + flower.x * 0.015) * 0.04;
   const petalCount = 6;
   const petalRadius = flower.radius * 0.62;
   const petalDistance = flower.radius * 0.65;
-  const panic = game.timeLeft <= 5;
 
   ctx.save();
 
   if (isTarget) {
-    const targetGlow = panic ? "rgba(255, 70, 90, 0.34)" : "rgba(255, 214, 90, 0.34)";
-    ctx.fillStyle = targetGlow;
+    ctx.fillStyle = "rgba(255, 214, 90, 0.22)";
     ctx.beginPath();
     ctx.arc(
       flower.x,
       flower.y,
-      flower.catchRadius + 12 + Math.sin(elapsed * 5) * 3,
+      flower.catchRadius + 10 + Math.sin(nowSec * 5) * 3,
       0,
       Math.PI * 2
     );
@@ -736,11 +743,11 @@ function drawFlower(flower, isTarget, elapsed) {
   }
 
   for (let i = 0; i < petalCount; i++) {
-    const angle = (Math.PI * 2 * i) / petalCount + elapsed * 0.2;
+    const angle = (Math.PI * 2 * i) / petalCount + nowSec * 0.18 * flower.direction;
     const px = flower.x + Math.cos(angle) * petalDistance;
     const py = flower.y + Math.sin(angle) * petalDistance;
 
-    ctx.fillStyle = panic && isTarget ? "#ff8a9a" : flower.petal;
+    ctx.fillStyle = flower.petal;
     ctx.beginPath();
     ctx.arc(px, py, petalRadius, 0, Math.PI * 2);
     ctx.fill();
@@ -757,44 +764,52 @@ function drawFlower(flower, isTarget, elapsed) {
   ctx.arc(flower.x, flower.y, flower.radius * pulse, 0, Math.PI * 2);
   ctx.stroke();
 
-  ctx.strokeStyle = isTarget
-    ? (panic ? "rgba(255,70,90,0.98)" : "rgba(255, 214, 90, 0.98)")
-    : "rgba(255,255,255,0.22)";
-  ctx.lineWidth = isTarget ? 4 : 2;
-  ctx.setLineDash(isTarget ? [] : [6, 8]);
+  ctx.restore();
+}
+
+function drawLandingZones(flower, nowSec) {
+  const spinAngle = flower.baseAngle + nowSec * getRotationSpeed() * flower.direction;
+  const safe = flower.safeAngle + spinAngle;
+  const windows = getWindowAngles();
+
+  const normalStart = safe - windows.normal;
+  const normalEnd = safe + windows.normal;
+  const perfectStart = safe - windows.perfect;
+  const perfectEnd = safe + windows.perfect;
+
+  ctx.save();
+
+  ctx.strokeStyle = "rgba(76, 197, 104, 0.92)";
+  ctx.lineWidth = 8;
   ctx.beginPath();
-  ctx.arc(flower.x, flower.y, flower.catchRadius, 0, Math.PI * 2);
+  ctx.arc(flower.x, flower.y, flower.catchRadius - 2, normalStart, normalEnd);
   ctx.stroke();
 
-  if (isTarget) {
-    ctx.setLineDash([3, 7]);
-    ctx.strokeStyle = panic ? "rgba(255,70,90,0.8)" : "rgba(255,214,90,0.7)";
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.arc(flower.x, flower.y, flower.perfectRadius, 0, Math.PI * 2);
-    ctx.stroke();
-  }
+  ctx.strokeStyle = "rgba(255, 214, 90, 0.98)";
+  ctx.lineWidth = 9;
+  ctx.beginPath();
+  ctx.arc(flower.x, flower.y, flower.catchRadius - 2, perfectStart, perfectEnd);
+  ctx.stroke();
 
   ctx.restore();
+}
 
-  const thornSettings = getThornSettings(elapsed);
-  if (thornSettings.count <= 0) return;
+function drawThorns(flower, nowSec) {
+  const spinAngle = flower.baseAngle + nowSec * getRotationSpeed() * flower.direction;
 
-  for (let i = 0; i < thornSettings.count; i++) {
-    const angle =
-      flower.baseAngle +
-      elapsed * thornSettings.speed +
-      (Math.PI * 2 * i) / thornSettings.count;
+  for (const thornBase of flower.thorns) {
+    const angle = thornBase + spinAngle;
 
     const tx = flower.x + Math.cos(angle) * flower.thornLength;
     const ty = flower.y + Math.sin(angle) * flower.thornLength;
 
     ctx.save();
-    ctx.strokeStyle = panic ? "#e14058" : "#8b2f3c";
+    ctx.strokeStyle = "#8b2f3c";
     ctx.lineWidth = 6;
     ctx.lineCap = "round";
     ctx.shadowBlur = 8;
-    ctx.shadowColor = panic ? "#ff4d6d" : "#b43c4f";
+    ctx.shadowColor = "#b43c4f";
+
     ctx.beginPath();
     ctx.moveTo(flower.x, flower.y);
     ctx.lineTo(tx, ty);
@@ -825,18 +840,25 @@ function drawFlower(flower, isTarget, elapsed) {
   }
 }
 
-function drawGuideLine() {
-  const p = game.player;
-  if (!p || p.mode !== "anchor") return;
+function drawDirectionHint(flower) {
+  const text = flower.direction === 1 ? "↻" : "↺";
+  ctx.save();
+  ctx.font = "bold 18px Arial";
+  ctx.textAlign = "center";
+  ctx.fillStyle = "rgba(25,49,38,0.55)";
+  ctx.fillText(text, flower.x, flower.y - flower.catchRadius - 16);
+  ctx.restore();
+}
 
-  const panic = game.timeLeft <= 5;
+function drawGuideLine() {
+  if (!game.player || game.player.state !== "orbit") return;
 
   ctx.save();
   ctx.setLineDash([7, 10]);
-  ctx.strokeStyle = panic ? "rgba(255,70,90,0.42)" : "rgba(75, 96, 40, 0.3)";
-  ctx.lineWidth = panic ? 2.8 : 2;
+  ctx.strokeStyle = "rgba(75, 96, 40, 0.25)";
+  ctx.lineWidth = 2;
   ctx.beginPath();
-  ctx.moveTo(p.x, p.y);
+  ctx.moveTo(game.player.x, game.player.y);
   ctx.lineTo(game.nextFlower.x, game.nextFlower.y);
   ctx.stroke();
   ctx.restore();
@@ -860,10 +882,10 @@ function drawBee() {
   ctx.translate(p.x, p.y);
 
   let angle = 0;
-  if (p.mode === "jump") {
-    angle = Math.atan2(p.vy, p.vx);
+  if (p.state === "flight") {
+    angle = Math.atan2(p.endY - p.startY, p.endX - p.startX);
   } else {
-    angle = p.anchorAngle + Math.PI / 2;
+    angle = p.angle + Math.PI / 2;
   }
   ctx.rotate(angle);
 
@@ -906,42 +928,19 @@ function drawBee() {
   ctx.arc(10, 0, 4, 0, Math.PI * 2);
   ctx.fill();
 
-  ctx.strokeStyle = "#1f1f1f";
-  ctx.lineWidth = 1.5;
-  ctx.beginPath();
-  ctx.moveTo(11, -3);
-  ctx.quadraticCurveTo(15, -9, 18, -10);
-  ctx.moveTo(11, 3);
-  ctx.quadraticCurveTo(15, 9, 18, 10);
-  ctx.stroke();
-
   ctx.restore();
 }
 
-function drawPhaseHint(elapsed) {
-  let text = "BUZZING";
-  let color = "#2f9348";
-
-  if (elapsed >= 8 && elapsed < 16) {
-    text = "THORNS ACTIVE";
-    color = "#b25a00";
-  } else if (elapsed >= 16 && elapsed < 24) {
-    text = "DANGER";
-    color = "#d46a00";
-  } else if (elapsed >= 24 && elapsed < 25) {
-    text = "WILD GARDEN";
-    color = "#b13545";
-  } else if (elapsed >= 25) {
-    text = "PANIC MODE";
-    color = "#e14058";
+function drawParticles() {
+  for (const p of game.particles) {
+    ctx.save();
+    ctx.globalAlpha = clamp(p.life, 0, 1);
+    ctx.fillStyle = p.color;
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
   }
-
-  ctx.save();
-  ctx.textAlign = "center";
-  ctx.font = "bold 14px Arial";
-  ctx.fillStyle = color;
-  ctx.fillText(text, width / 2, 36);
-  ctx.restore();
 }
 
 function drawPopup() {
@@ -956,39 +955,34 @@ function drawPopup() {
   ctx.restore();
 }
 
-function drawPanicOverlay() {
-  if (game.timeLeft > 5 || !game.running) return;
-
-  const strength = (5 - game.timeLeft) / 5;
-  ctx.save();
-  ctx.fillStyle = `rgba(225,64,88,${0.05 + strength * 0.08})`;
-  ctx.fillRect(0, 0, width, height);
-  ctx.restore();
-}
-
 function drawScene() {
   ctx.clearRect(0, 0, width, height);
 
-  const shakeX = game.shake > 0 ? rand(-4, 4) * game.shake : 0;
-  const shakeY = game.shake > 0 ? rand(-3, 3) * game.shake : 0;
+  const shakeX = game.cameraShake > 0 ? rand(-4, 4) * game.cameraShake : 0;
+  const shakeY = game.cameraShake > 0 ? rand(-3, 3) * game.cameraShake : 0;
 
   ctx.save();
   ctx.translate(shakeX, shakeY);
 
   drawBackground();
 
-  const elapsed = ROUND_TIME - game.timeLeft;
+  const nowSec = performance.now() / 1000;
 
-  if (game.currentFlower) {
+  if (game.currentFlower && game.nextFlower) {
     drawGuideLine();
-    drawFlower(game.currentFlower, false, elapsed);
-    drawFlower(game.nextFlower, true, elapsed);
+
+    drawFlowerBase(game.currentFlower, false, nowSec);
+    drawLandingZones(game.currentFlower, nowSec);
+    drawThorns(game.currentFlower, nowSec);
+    drawDirectionHint(game.currentFlower);
+
+    drawFlowerBase(game.nextFlower, true, nowSec);
+    drawDirectionHint(game.nextFlower);
+
+    drawParticles();
     drawBee();
-    drawPhaseHint(elapsed);
     drawPopup();
   }
-
-  drawPanicOverlay();
 
   if (!game.running && !game.roundOver) {
     ctx.save();
@@ -1015,19 +1009,27 @@ function gameLoop(timestamp) {
   requestAnimationFrame(gameLoop);
 }
 
-window.addEventListener("resize", resizeCanvas);
+window.addEventListener("resize", () => {
+  resizeCanvas();
+  if (!game.running) {
+    resetRound();
+  }
+});
 
-canvas.addEventListener("pointerdown", launchBee);
+canvas.addEventListener("pointerdown", tryJump);
 
 document.addEventListener("keydown", (event) => {
   if (event.code === "Space" || event.code === "Enter" || event.code === "ArrowUp") {
     event.preventDefault();
-    launchBee();
+    tryJump();
   }
 });
 
 actionBtn.addEventListener("click", beginRound);
+soundToggleBtn.addEventListener("click", toggleSound);
+startSoundToggleBtn.addEventListener("click", toggleSound);
 
-loadBestScore();
+loadPrefs();
 resizeCanvas();
+resetRound();
 requestAnimationFrame(gameLoop);
