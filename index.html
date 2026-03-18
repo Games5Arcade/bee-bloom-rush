@@ -13,12 +13,14 @@
   <div id="hud">
     <div class="hud-left">
       <div id="title">BEE BLOOM RUSH</div>
-      <div id="subtitle">Tap to jump flower-to-flower</div>
+      <div id="subtitle">Tap when aligned</div>
     </div>
+
     <div class="hud-right">
       <div id="timer">30.0s</div>
       <div id="score">Score: 0</div>
       <div id="best">Best: 0</div>
+      <button id="soundToggle" class="hud-btn" aria-label="Toggle sound">🔊</button>
     </div>
   </div>
 
@@ -28,19 +30,20 @@
     <div class="panel">
       <h1>BEE BLOOM RUSH</h1>
       <p class="lead">
-        Buzz around each flower and leap to the next one before time runs out.
+        Rotate around each flower and tap when the bee lines up with the safe landing zone.
       </p>
 
       <div class="rules">
-        <div><strong>How to play:</strong> Tap to launch your bee from the current flower to the next glowing flower.</div>
-        <div><strong>Objective:</strong> Land on as many flowers as possible during the round.</div>
-        <div><strong>Danger:</strong> Spinning thorn stems appear later and get faster as the timer drops.</div>
-        <div><strong>Bonus:</strong> Land near the centre of a flower for a PERFECT bonus.</div>
-        <div><strong>Scoring:</strong> +1 for every successful flower landing. PERFECT landings give +2.</div>
+        <div><strong>How to play:</strong> Wait for the bee to rotate into the highlighted landing zone, then tap to jump.</div>
+        <div><strong>Perfect:</strong> Hit the small gold zone for <strong>+2</strong>.</div>
+        <div><strong>Normal:</strong> Hit the wider green zone for <strong>+1</strong>.</div>
+        <div><strong>Danger:</strong> Thorn branches rotate with the flower. Tap into a thorn or outside the zone and the round ends.</div>
+        <div><strong>Round:</strong> You have 30 seconds to score as many flowers as possible.</div>
       </div>
 
       <div class="button-row">
         <button id="actionBtn" class="primary-btn">Tap to Start</button>
+        <button id="startSoundToggle" class="secondary-btn">Sound: ON</button>
       </div>
     </div>
   </div>
