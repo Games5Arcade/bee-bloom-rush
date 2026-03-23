@@ -288,14 +288,12 @@ function makeFlower(x, y, radius, index) {
     y,
     radius,
     catchRadius: radius * 1.72,
-    perfectRadius: radius * 0.5,
     petal: style.petal,
     center: style.center,
     direction,
-    baseAngle: rand(0, Math.PI * 2),
     thornLength: radius * 2.05,
+    landingAngle: 0,
     thorns: [],
-    safeAngle: 0,
   };
 }
 
@@ -370,20 +368,30 @@ function makeNextFlower(fromFlower, index) {
   return clampFlowerToScreen(makeFlower(slot.x, slot.y, radius, index));
 }
 
-function configureSafeGap(currentFlower, nextFlower) {
-  const targetAngle = Math.atan2(nextFlower.y - currentFlower.y, nextFlower.x - currentFlower.x);
-  currentFlower.safeAngle = targetAngle;
+function configureNextFlower(currentFlower, nextFlower) {
+  // landing zone is on the NEXT flower, facing back toward the current flower
+  const landingAngle = Math.atan2(
+    currentFlower.y - nextFlower.y,
+    currentFlower.x - nextFlower.x
+  );
+
+  nextFlower.landingAngle = landingAngle;
+  nextFlower.thorns = [];
 
   const thornCount = getThornCount();
   const gap = (Math.PI * 2) / thornCount;
   const halfGap = gap / 2;
 
-  currentFlower.thorns = [];
-
   for (let i = 0; i < thornCount; i++) {
-    const thornAngle = targetAngle + halfGap + i * gap;
-    currentFlower.thorns.push(thornAngle);
+    nextFlower.thorns.push(landingAngle + halfGap + i * gap);
   }
+}
+
+function getLaunchAngle() {
+  return Math.atan2(
+    game.nextFlower.y - game.currentFlower.y,
+    game.nextFlower.x - game.currentFlower.x
+  );
 }
 
 function updatePlayerAnchorPosition() {
@@ -432,7 +440,9 @@ function resetRound() {
 
   game.currentFlower = makeStartFlower();
   game.nextFlower = makeNextFlower(game.currentFlower, game.flowerIndex);
-  configureSafeGap(game.currentFlower, game.nextFlower);
+  configureNextFlower(game.currentFlower, game.nextFlower);
+
+  const initialLaunchAngle = getLaunchAngle();
 
   game.player = {
     state: "orbit",
@@ -440,7 +450,7 @@ function resetRound() {
     y: 0,
     r: isMobileViewport() ? 10 : 11,
     orbitRadius: game.currentFlower.radius + 16,
-    angle: game.currentFlower.safeAngle - Math.PI / 2,
+    angle: initialLaunchAngle - Math.PI / 2,
     startX: 0,
     startY: 0,
     endX: 0,
@@ -448,6 +458,7 @@ function resetRound() {
     flightProgress: 0,
     flightDuration: 0.22,
     awardedPoints: 0,
+    landedAngle: 0,
     trail: [],
     wingPhase: 0,
   };
@@ -484,7 +495,7 @@ function finishRound(title, text) {
         <div><strong>Round score:</strong> ${game.score}</div>
         <div><strong>High score:</strong> ${game.bestScore}</div>
         <div><strong>Scoring:</strong> Gold zone = +2, green zone = +1</div>
-        <div><strong>Rule:</strong> Tap only when the bee is inside the safe gap.</div>
+        <div><strong>Rule:</strong> Aim for the landing zone on the next flower.</div>
       </div>
 
       <div class="button-row">
@@ -507,13 +518,9 @@ function tryJump() {
 
   if (!game.player || game.player.state !== "orbit") return;
 
-  const playerAngle = Math.atan2(
-    game.player.y - game.currentFlower.y,
-    game.player.x - game.currentFlower.x
-  );
-
+  const launchAngle = getLaunchAngle();
+  const diff = angleDistance(game.player.angle, launchAngle);
   const windows = getWindowAngles();
-  const diff = angleDistance(playerAngle, game.currentFlower.safeAngle);
 
   let awardedPoints = 0;
 
@@ -524,24 +531,29 @@ function tryJump() {
     awardedPoints = 1;
     playLandSound();
   } else {
-    finishRound("ROUND OVER", "You launched outside the safe landing zone.");
+    finishRound("ROUND OVER", "You launched too early or too late.");
     return;
   }
 
   playJumpSound();
 
+  const landingRadius = game.nextFlower.radius + 16;
+  const endX = game.nextFlower.x + Math.cos(game.nextFlower.landingAngle) * landingRadius;
+  const endY = game.nextFlower.y + Math.sin(game.nextFlower.landingAngle) * landingRadius;
+
   game.player.state = "flight";
   game.player.flightProgress = 0;
   game.player.flightDuration = clamp(
-    distance(game.currentFlower.x, game.currentFlower.y, game.nextFlower.x, game.nextFlower.y) / 720,
+    distance(game.player.x, game.player.y, endX, endY) / 720,
     0.16,
     0.34
   );
   game.player.startX = game.player.x;
   game.player.startY = game.player.y;
-  game.player.endX = game.nextFlower.x;
-  game.player.endY = game.nextFlower.y;
+  game.player.endX = endX;
+  game.player.endY = endY;
   game.player.awardedPoints = awardedPoints;
+  game.player.landedAngle = game.nextFlower.landingAngle;
 }
 
 function completeJump() {
@@ -563,15 +575,11 @@ function completeJump() {
   game.currentFlower = landedFlower;
   game.flowerIndex += 1;
   game.nextFlower = makeNextFlower(game.currentFlower, game.flowerIndex);
-  configureSafeGap(game.currentFlower, game.nextFlower);
+  configureNextFlower(game.currentFlower, game.nextFlower);
 
   game.player.state = "orbit";
   game.player.orbitRadius = game.currentFlower.radius + 16;
-
-  const safeAngle = game.currentFlower.safeAngle;
-  const offset = game.currentFlower.direction === 1 ? -Math.PI / 2 : Math.PI / 2;
-  game.player.angle = safeAngle + offset;
-
+  game.player.angle = game.player.landedAngle;
   updatePlayerAnchorPosition();
 }
 
@@ -767,9 +775,9 @@ function drawFlowerBase(flower, isTarget, nowSec) {
   ctx.restore();
 }
 
-function drawLandingZones(flower, nowSec) {
-  const spinAngle = flower.baseAngle + nowSec * getRotationSpeed() * flower.direction;
-  const safe = flower.safeAngle + spinAngle;
+function drawLandingZonesOnNextFlower(flower, nowSec) {
+  const spinAngle = nowSec * getRotationSpeed() * flower.direction;
+  const safe = flower.landingAngle + spinAngle;
   const windows = getWindowAngles();
 
   const normalStart = safe - windows.normal;
@@ -794,8 +802,8 @@ function drawLandingZones(flower, nowSec) {
   ctx.restore();
 }
 
-function drawThorns(flower, nowSec) {
-  const spinAngle = flower.baseAngle + nowSec * getRotationSpeed() * flower.direction;
+function drawThornsOnNextFlower(flower, nowSec) {
+  const spinAngle = nowSec * getRotationSpeed() * flower.direction;
 
   for (const thornBase of flower.thorns) {
     const angle = thornBase + spinAngle;
@@ -972,11 +980,11 @@ function drawScene() {
     drawGuideLine();
 
     drawFlowerBase(game.currentFlower, false, nowSec);
-    drawLandingZones(game.currentFlower, nowSec);
-    drawThorns(game.currentFlower, nowSec);
     drawDirectionHint(game.currentFlower);
 
     drawFlowerBase(game.nextFlower, true, nowSec);
+    drawLandingZonesOnNextFlower(game.nextFlower, nowSec);
+    drawThornsOnNextFlower(game.nextFlower, nowSec);
     drawDirectionHint(game.nextFlower);
 
     drawParticles();
