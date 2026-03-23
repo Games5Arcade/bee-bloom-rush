@@ -95,12 +95,12 @@ function getPlayArea() {
 
 function getMinFlowerDistance() {
   const minDimension = Math.min(width, height);
-  return isMobileViewport() ? minDimension * 0.24 : minDimension * 0.26;
+  return isMobileViewport() ? minDimension * 0.21 : minDimension * 0.23;
 }
 
 function getIdealFlowerDistance() {
   const minDimension = Math.min(width, height);
-  return isMobileViewport() ? minDimension * 0.34 : minDimension * 0.38;
+  return isMobileViewport() ? minDimension * 0.31 : minDimension * 0.35;
 }
 
 function createClouds() {
@@ -255,22 +255,35 @@ function playFailSound() {
 }
 
 function getThornCount() {
-  if (game.score < 4) return 1;
-  if (game.score < 10) return 2;
+  if (game.score < 6) return 1;
+  if (game.score < 14) return 2;
   return 3;
 }
 
 function getRotationSpeed() {
-  if (game.score < 5) return 1.35;
-  if (game.score < 12) return 1.65;
-  return 1.95;
+  if (game.score < 6) return 1.15;
+  if (game.score < 14) return 1.4;
+  return 1.7;
 }
 
-function getWindowAngles() {
-  return {
-    perfect: Math.PI / 18, // 10°
-    normal: Math.PI / 7.5, // 24°
-  };
+function getPerfectWindowAngle() {
+  return Math.PI / 18; // 10°
+}
+
+function getFlowerRadiusByIndex(index) {
+  const mobile = isMobileViewport();
+  const pattern = ["standard", "standard", "small", "standard", "standard", "big"];
+  const type = pattern[index % pattern.length];
+
+  if (mobile) {
+    if (type === "small") return 22;
+    if (type === "big") return 30;
+    return 26;
+  }
+
+  if (type === "small") return 24;
+  if (type === "big") return 34;
+  return 29;
 }
 
 function makeFlower(x, y, radius, index) {
@@ -287,7 +300,7 @@ function makeFlower(x, y, radius, index) {
     x,
     y,
     radius,
-    catchRadius: radius * 1.72,
+    catchRadius: radius * 1.78,
     petal: style.petal,
     center: style.center,
     direction,
@@ -333,7 +346,7 @@ function getFlowerSlots() {
 function makeStartFlower() {
   const slots = getFlowerSlots();
   const slot = slots[20];
-  const radius = isMobileViewport() ? 26 : 28;
+  const radius = getFlowerRadiusByIndex(0);
   return clampFlowerToScreen(makeFlower(slot.x, slot.y, radius, 0));
 }
 
@@ -364,12 +377,11 @@ function chooseNextSlot(fromFlower) {
 
 function makeNextFlower(fromFlower, index) {
   const slot = chooseNextSlot(fromFlower);
-  const radius = isMobileViewport() ? rand(22, 28) : rand(23, 32);
+  const radius = getFlowerRadiusByIndex(index);
   return clampFlowerToScreen(makeFlower(slot.x, slot.y, radius, index));
 }
 
 function configureNextFlower(currentFlower, nextFlower) {
-  // landing zone is on the NEXT flower, facing back toward the current flower
   const landingAngle = Math.atan2(
     currentFlower.y - nextFlower.y,
     currentFlower.x - nextFlower.x
@@ -494,8 +506,8 @@ function finishRound(title, text) {
       <div class="rules">
         <div><strong>Round score:</strong> ${game.score}</div>
         <div><strong>High score:</strong> ${game.bestScore}</div>
-        <div><strong>Scoring:</strong> Gold zone = +2, green zone = +1</div>
-        <div><strong>Rule:</strong> Aim for the landing zone on the next flower.</div>
+        <div><strong>Scoring:</strong> Gold zone = +2, any other safe landing = +1</div>
+        <div><strong>Rule:</strong> Hit the next flower and avoid the thorns.</div>
       </div>
 
       <div class="button-row">
@@ -518,28 +530,15 @@ function tryJump() {
 
   if (!game.player || game.player.state !== "orbit") return;
 
-  const launchAngle = getLaunchAngle();
-  const diff = angleDistance(game.player.angle, launchAngle);
-  const windows = getWindowAngles();
-
-  let awardedPoints = 0;
-
-  if (diff <= windows.perfect) {
-    awardedPoints = 2;
-    playPerfectSound();
-  } else if (diff <= windows.normal) {
-    awardedPoints = 1;
-    playLandSound();
-  } else {
-    finishRound("ROUND OVER", "You launched too early or too late.");
-    return;
-  }
-
   playJumpSound();
 
   const landingRadius = game.nextFlower.radius + 16;
   const endX = game.nextFlower.x + Math.cos(game.nextFlower.landingAngle) * landingRadius;
   const endY = game.nextFlower.y + Math.sin(game.nextFlower.landingAngle) * landingRadius;
+
+  const launchAngle = getLaunchAngle();
+  const diff = angleDistance(game.player.angle, launchAngle);
+  const perfectWindow = getPerfectWindowAngle();
 
   game.player.state = "flight";
   game.player.flightProgress = 0;
@@ -552,7 +551,7 @@ function tryJump() {
   game.player.startY = game.player.y;
   game.player.endX = endX;
   game.player.endY = endY;
-  game.player.awardedPoints = awardedPoints;
+  game.player.awardedPoints = diff <= perfectWindow ? 2 : 1;
   game.player.landedAngle = game.nextFlower.landingAngle;
 }
 
@@ -562,6 +561,12 @@ function completeJump() {
 
   game.score += points;
   scoreEl.textContent = `Score: ${game.score}`;
+
+  if (points === 2) {
+    playPerfectSound();
+  } else {
+    playLandSound();
+  }
 
   showPopup(
     points === 2 ? "PERFECT +2" : "+1",
@@ -775,30 +780,23 @@ function drawFlowerBase(flower, isTarget, nowSec) {
   ctx.restore();
 }
 
-function drawLandingZonesOnNextFlower(flower, nowSec) {
+function drawPerfectZoneOnNextFlower(flower, nowSec) {
   const spinAngle = nowSec * getRotationSpeed() * flower.direction;
-  const safe = flower.landingAngle + spinAngle;
-  const windows = getWindowAngles();
-
-  const normalStart = safe - windows.normal;
-  const normalEnd = safe + windows.normal;
-  const perfectStart = safe - windows.perfect;
-  const perfectEnd = safe + windows.perfect;
+  const perfect = flower.landingAngle + spinAngle;
+  const perfectWindow = getPerfectWindowAngle();
 
   ctx.save();
-
-  ctx.strokeStyle = "rgba(76, 197, 104, 0.92)";
-  ctx.lineWidth = 8;
-  ctx.beginPath();
-  ctx.arc(flower.x, flower.y, flower.catchRadius - 2, normalStart, normalEnd);
-  ctx.stroke();
-
   ctx.strokeStyle = "rgba(255, 214, 90, 0.98)";
   ctx.lineWidth = 9;
   ctx.beginPath();
-  ctx.arc(flower.x, flower.y, flower.catchRadius - 2, perfectStart, perfectEnd);
+  ctx.arc(
+    flower.x,
+    flower.y,
+    flower.catchRadius - 2,
+    perfect - perfectWindow,
+    perfect + perfectWindow
+  );
   ctx.stroke();
-
   ctx.restore();
 }
 
@@ -983,7 +981,7 @@ function drawScene() {
     drawDirectionHint(game.currentFlower);
 
     drawFlowerBase(game.nextFlower, true, nowSec);
-    drawLandingZonesOnNextFlower(game.nextFlower, nowSec);
+    drawPerfectZoneOnNextFlower(game.nextFlower, nowSec);
     drawThornsOnNextFlower(game.nextFlower, nowSec);
     drawDirectionHint(game.nextFlower);
 
